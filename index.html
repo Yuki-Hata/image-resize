@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- connect-src 'none': the page cannot send anything anywhere; all processing stays in the browser. -->
+<!-- 'unsafe-eval' and blob: workers are needed only by the bundled HEIC decoder. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-eval'; worker-src blob:; img-src 'self' blob: data:; style-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>画像サイズ変換</title>
+<meta name="description" content="画像をまとめて縮小・形式変換。ブラウザの中だけで処理し、どこにも送信しません。">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<div class="page">
+  <header class="top">
+    <div class="brand">
+      <img src="icon.svg" alt="" width="44" height="44">
+      <div>
+        <h1>画像サイズ変換</h1>
+        <p class="lead">Macの「画像を変換」のように、まとめて縮小・形式変換できます。</p>
+      </div>
+    </div>
+    <p class="privacy">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2"/><rect x="4.5" y="10" width="15" height="11" rx="2.5"/></svg>
+      画像はこのパソコンの中だけで処理され、どこにも送信されません。
+    </p>
+  </header>
+
+  <main>
+    <section class="panel settings" aria-label="変換の設定">
+      <div class="field">
+        <span class="label" id="lbl-format">形式</span>
+        <div class="seg" role="radiogroup" aria-labelledby="lbl-format" data-setting="format">
+          <button type="button" role="radio" data-value="jpeg">JPEG</button>
+          <button type="button" role="radio" data-value="png">PNG</button>
+          <button type="button" role="radio" data-value="webp">WebP</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <span class="label" id="lbl-size">サイズ<small>（長い辺）</small></span>
+        <div class="size-row">
+          <div class="seg" role="radiogroup" aria-labelledby="lbl-size" data-setting="size">
+            <button type="button" role="radio" data-value="640">640px</button>
+            <button type="button" role="radio" data-value="1280">1280px</button>
+            <button type="button" role="radio" data-value="1920">1920px</button>
+            <button type="button" role="radio" data-value="2560">2560px</button>
+            <button type="button" role="radio" data-value="original">元のサイズ</button>
+            <button type="button" role="radio" data-value="custom">指定</button>
+          </div>
+          <label class="custom" id="custom-wrap" hidden>
+            <input type="number" id="custom-size" min="16" max="16384" step="1" inputmode="numeric" aria-label="長い辺のピクセル数">
+            <span>px</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="field" id="quality-field">
+        <label class="label" for="quality">画質</label>
+        <div class="quality">
+          <input type="range" id="quality" min="40" max="100" step="1">
+          <output id="quality-out" for="quality"></output>
+        </div>
+      </div>
+
+      <div class="settings-foot">
+        <p class="hint">縦長でも横長でも、長い方の辺がこの大きさになります。元より大きくはしません。</p>
+        <button type="button" class="link" id="reset" hidden>初期設定に戻す</button>
+      </div>
+    </section>
+
+    <div class="drop" id="drop" role="button" tabindex="0" aria-describedby="drop-sub">
+      <input type="file" id="file-input" multiple accept="image/*,.heic,.heif" hidden>
+      <svg viewBox="0 0 48 48" aria-hidden="true">
+        <rect x="6" y="9" width="36" height="30" rx="5"/>
+        <circle cx="17" cy="19" r="3.5"/>
+        <path d="M6.5 33l10-9.5 7.5 7 6-5.5 11.5 10.5"/>
+      </svg>
+      <strong>ここに画像をドラッグ＆ドロップ<span class="more">して追加</span></strong>
+      <span id="drop-sub">何枚でもまとめて・フォルダごとでもOK ／ クリックして選ぶこともできます</span>
+    </div>
+
+    <section class="results" id="results" hidden aria-label="変換結果">
+      <div class="bar">
+        <p class="summary" id="summary" aria-live="polite"></p>
+        <div class="actions">
+          <button type="button" class="btn primary" id="save-zip">まとめて保存（ZIP）</button>
+          <button type="button" class="btn" id="save-folder" hidden>フォルダを選んで保存</button>
+          <button type="button" class="btn ghost" id="clear">クリア</button>
+        </div>
+      </div>
+      <div class="progress" id="progress-wrap" hidden><div id="progress"></div></div>
+      <ul class="list" id="list"></ul>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>iPhoneの写真（HEIC）も読み込めます。位置情報などの撮影情報は、書き出した画像には残りません。</p>
+  </footer>
+</div>
+
+<div class="drag-cover" aria-hidden="true"><p>離すと変換します</p></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
