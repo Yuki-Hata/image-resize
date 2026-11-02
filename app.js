@@ -7,17 +7,19 @@ const FORMATS = {
 };
 const DEFAULTS = { format: 'jpeg', size: '1280', custom: 1280, quality: 85 };
 const SIZE_VALUES = ['640', '1280', '1920', '2560', 'original', 'custom'];
+const QUALITY_VALUES = [60, 75, 85, 95]; // 低・中・高・最高
 const STORAGE_KEY = 'image-resize:settings';
 const IMAGE_NAME = /\.(jpe?g|jfif|png|gif|webp|bmp|ico|avif|heic|heif|tiff?)$/i;
 const HEIC_NAME = /\.(heic|heif)$/i;
 const PARALLEL = 2;
-const THUMB_PX = 112;
+const THUMB_PX = 400; // preview cards are 200px wide; 2x for sharp screens
 
 const $ = (selector) => document.querySelector(selector);
 const el = {
   drop: $('#drop'),
   input: $('#file-input'),
-  results: $('#results'),
+  files: $('#files'),
+  filesMeta: $('#files-meta'),
   list: $('#list'),
   summary: $('#summary'),
   progressWrap: $('#progress-wrap'),
@@ -25,9 +27,8 @@ const el = {
   zip: $('#save-zip'),
   folder: $('#save-folder'),
   clear: $('#clear'),
-  quality: $('#quality'),
-  qualityOut: $('#quality-out'),
   qualityField: $('#quality-field'),
+  qualityNote: $('#quality-note'),
   custom: $('#custom-size'),
   customWrap: $('#custom-wrap'),
   reset: $('#reset'),
@@ -57,7 +58,8 @@ function loadSettings() {
   if (!SIZE_VALUES.includes(String(s.size))) s.size = DEFAULTS.size;
   s.size = String(s.size);
   s.custom = clamp(Math.round(Number(s.custom)) || DEFAULTS.custom, 16, 16384);
-  s.quality = clamp(Math.round(Number(s.quality)) || DEFAULTS.quality, 40, 100);
+  s.quality = Number(s.quality);
+  if (!QUALITY_VALUES.includes(s.quality)) s.quality = DEFAULTS.quality;
   return s;
 }
 
@@ -72,21 +74,20 @@ function isDefault() {
 }
 
 function syncSettingsUI() {
-  for (const group of document.querySelectorAll('.seg[data-setting]')) {
+  const lossy = FORMATS[settings.format].lossy;
+  for (const group of document.querySelectorAll('.qbtns[data-setting]')) {
     const value = String(settings[group.dataset.setting]);
     for (const btn of group.querySelectorAll('button')) {
       const on = btn.dataset.value === value;
       btn.setAttribute('aria-checked', String(on));
       btn.tabIndex = on ? 0 : -1;
+      if (group.dataset.setting === 'quality') btn.disabled = !lossy;
     }
   }
   el.customWrap.hidden = settings.size !== 'custom';
   el.custom.value = settings.custom;
-  el.quality.value = settings.quality;
-  el.qualityOut.textContent = settings.quality;
-  const lossy = FORMATS[settings.format].lossy;
-  el.quality.disabled = !lossy;
   el.qualityField.classList.toggle('is-disabled', !lossy);
+  el.qualityNote.hidden = lossy;
   el.reset.hidden = isDefault();
 }
 
@@ -99,12 +100,12 @@ function settingsChanged() {
 function choose(group, btn) {
   const key = group.dataset.setting;
   if (String(settings[key]) === btn.dataset.value) return;
-  settings[key] = btn.dataset.value;
+  settings[key] = key === 'quality' ? Number(btn.dataset.value) : btn.dataset.value;
   settingsChanged();
   if (key === 'size' && btn.dataset.value === 'custom') el.custom.select();
 }
 
-for (const group of document.querySelectorAll('.seg[data-setting]')) {
+for (const group of document.querySelectorAll('.qbtns[data-setting]')) {
   group.addEventListener('click', (e) => {
     const btn = e.target.closest('button');
     if (btn && !btn.disabled) choose(group, btn);
@@ -120,13 +121,6 @@ for (const group of document.querySelectorAll('.seg[data-setting]')) {
   });
 }
 
-el.quality.addEventListener('input', () => {
-  el.qualityOut.textContent = el.quality.value;
-});
-el.quality.addEventListener('change', () => {
-  settings.quality = Number(el.quality.value);
-  settingsChanged();
-});
 el.custom.addEventListener('change', () => {
   settings.custom = clamp(Math.round(Number(el.custom.value)) || DEFAULTS.custom, 16, 16384);
   settingsChanged();
@@ -448,7 +442,7 @@ async function makeThumb(canvas) {
   const t = makeCanvas(Math.max(1, Math.round(canvas.width * scale)), Math.max(1, Math.round(canvas.height * scale)));
   t.getContext('2d').drawImage(canvas, 0, 0, t.width, t.height);
   try {
-    return await encode(t, 'image/png');
+    return await encode(t, canEncodeWebp ? 'image/webp' : 'image/png');
   } finally {
     t.width = t.height = 0;
   }
@@ -458,63 +452,59 @@ async function makeThumb(canvas) {
 
 function createRow() {
   const root = document.createElement('li');
-  root.className = 'item';
+  root.className = 'file-item';
   root.innerHTML = `
-    <div class="thumb"><img alt=""></div>
-    <div class="info"><p class="name"></p><p class="meta"></p></div>
-    <div class="row-actions">
-      <a class="btn small" hidden>保存</a>
-      <button type="button" class="icon-btn" aria-label="一覧から外す" title="一覧から外す">
-        <svg viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2l10 10M12 2L2 12"/></svg>
-      </button>
+    <div class="file-preview"><img alt=""><span class="file-status"></span></div>
+    <button type="button" class="btn-delete" aria-label="この画像を取り消す" title="取り消す">×</button>
+    <div class="file-info">
+      <p class="file-name"></p>
+      <p class="file-row"><span class="file-type"></span><span class="file-out"></span></p>
+      <p class="file-row"><span class="meta-title">変換前</span><span class="file-before"></span></p>
+      <p class="file-row file-after-row"><span class="meta-title">変換後</span><span class="file-after"></span></p>
+      <p class="file-row file-error"></p>
+      <a class="file-download" hidden>↓ 保存</a>
     </div>`;
   return {
     root,
     img: root.querySelector('img'),
-    name: root.querySelector('.name'),
-    meta: root.querySelector('.meta'),
+    status: root.querySelector('.file-status'),
+    name: root.querySelector('.file-name'),
+    type: root.querySelector('.file-type'),
+    out: root.querySelector('.file-out'),
+    before: root.querySelector('.file-before'),
+    afterRow: root.querySelector('.file-after-row'),
+    after: root.querySelector('.file-after'),
+    error: root.querySelector('.file-error'),
     save: root.querySelector('a'),
     remove: root.querySelector('button'),
   };
 }
 
 function render(item) {
-  const { row, result } = item;
+  const { row, result, file } = item;
   row.root.dataset.state = item.state;
-  row.name.textContent = item.file.name;
-  row.name.title = item.file.name;
+  row.name.textContent = file.name;
+  row.name.title = file.name;
+  row.status.textContent = item.state === 'working' ? '変換しています…' : '順番を待っています…';
 
   if (result) row.img.src = result.thumbUrl;
   else row.img.removeAttribute('src');
 
-  row.save.hidden = item.state !== 'done';
-  if (item.state === 'done') {
+  const done = item.state === 'done';
+  const outName = done ? result.name : file.name;
+  row.type.textContent = (splitExt(outName)[1].slice(1) || '?').toUpperCase();
+  row.out.textContent = done ? `${result.name} で保存` : '';
+  row.before.textContent = done ? `${result.srcW}×${result.srcH}・${formatBytes(file.size)}` : formatBytes(file.size);
+  row.after.textContent = done ? `${result.outW}×${result.outH}・${formatBytes(result.blob.size)}` : '…';
+  row.afterRow.hidden = item.state === 'error';
+  row.error.hidden = item.state !== 'error';
+  row.error.textContent = item.error;
+
+  row.save.hidden = !done;
+  if (done) {
     row.save.href = result.url;
     row.save.download = result.name;
-    row.save.title = `${result.name} として保存`;
-    const same = result.srcW === result.outW && result.srcH === result.outH;
-    row.meta.replaceChildren(
-      same
-        ? `${result.outW}×${result.outH}（大きさはそのまま）`
-        : `${result.srcW}×${result.srcH}`,
-      ...(same ? [] : [arrow(), `${result.outW}×${result.outH}`]),
-      '　',
-      formatBytes(item.file.size),
-      arrow(),
-      `${formatBytes(result.blob.size)}（${result.name}）`,
-    );
-  } else if (item.state === 'error') {
-    row.meta.textContent = item.error;
-  } else {
-    row.meta.textContent = item.state === 'working' ? '変換しています…' : '順番を待っています…';
   }
-}
-
-function arrow() {
-  const span = document.createElement('span');
-  span.className = 'arrow';
-  span.textContent = '→';
-  return span;
 }
 
 function doneItems() {
@@ -527,13 +517,16 @@ function updateSummary() {
   const failed = items.filter((i) => i.state === 'error').length;
   const pending = total - done.length - failed;
 
-  el.results.hidden = total === 0;
-  document.body.classList.toggle('has-items', total > 0);
+  el.files.hidden = total === 0;
+  el.filesMeta.textContent = `${total}枚の画像`;
+  el.clear.hidden = total === 0;
   el.progressWrap.hidden = pending === 0;
   el.progress.style.width = total ? `${((total - pending) / total) * 100}%` : '0';
 
   const parts = [];
-  if (pending) {
+  if (!total) {
+    parts.push('①で画像を入れると、ここから保存できます。');
+  } else if (pending) {
     parts.push(strong(`変換しています… ${total - pending} / ${total}枚`));
   } else if (done.length) {
     const before = done.reduce((s, i) => s + i.file.size, 0);
@@ -545,7 +538,7 @@ function updateSummary() {
 
   const ready = pending === 0 && done.length > 0;
   el.zip.disabled = el.folder.disabled = !ready;
-  el.zip.textContent = done.length === 1 ? '保存' : 'まとめて保存（ZIP）';
+  el.zip.textContent = done.length === 1 ? '↓ 保存' : '↓ まとめて保存（zip）';
 }
 
 function strong(text) {
